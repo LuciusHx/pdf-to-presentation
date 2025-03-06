@@ -3,88 +3,121 @@ import re
 from pptx import Presentation
 from pptx.util import Inches
 
-# ------ PDF ----------
-pdf_path = "arquivo.pdf"
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from ttkthemes import ThemedTk 
 
-# cabeça da matriz
-dados_tabela = [["Código", "Especificação", "Valor Empenhado", "Valor Liquidado", "Valor Pago"]]  
+# ------ selecionar o arquivo PDF ----------
+def selecionar_arquivo():
+    # janela para o usuário selecionar um arquivo PDF
+    caminho_pdf = filedialog.askopenfilename(
+        title="Selecione um arquivo PDF",
+        filetypes=[("Arquivos PDF", "*.pdf")]
+    )
+    if caminho_pdf:
+        entrada_arquivo.delete(0, tk.END)  # limpa campo de entrada
+        entrada_arquivo.insert(0, caminho_pdf)  # insere o caminho do arquivo no campo
 
-with pdfplumber.open(pdf_path) as pdf:
-    for page in pdf.pages:
-        texto = page.extract_text()  
-        if texto:
+# ------ Função para processar o PDF e criar o PowerPoint ----------
+def processar_pdf():
+    caminho_pdf = entrada_arquivo.get()  # Obtém o caminho do arquivo do campo de entrada
+    if not caminho_pdf:
+        messagebox.showwarning("Aviso", "Nenhum arquivo PDF selecionado!")
+        return
 
-            #quando tiver um \n, ele vai dividir as strings
-            linhas = texto.split("\n")  
+    # cabeça da matriz
+    dados_tabela = [["Código", "Especificação", "Valor Empenhado", "Valor Liquidado", "Valor Pago"]]
 
-            for linha in linhas:
+    def ler_pdf():
+        with pdfplumber.open(caminho_pdf) as pdf:
+            for page in pdf.pages:
+                texto = page.extract_text()
+                if texto:
+                    linhas = texto.split("\n")
+                    for linha in linhas:
+                        if re.match(r"^\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}", linha):
+                            match = re.match(r"^(\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2})\s+(.+?)\s+([\d\.,-]+)\s+([\d\.,-]+)\s+([\d\.,-]+)\*?$", linha)
+                            if match:
+                                codigo = match.group(1)
+                                especificacao = match.group(2).strip()
+                                empenhado = match.group(3)
+                                liquidado = match.group(4)
+                                pago = match.group(5)
+                                dados_tabela.append([codigo, especificacao, empenhado, liquidado, pago])
+                            else:
+                                partes = re.split(r"\s{2,}", linha)
+                                if len(partes) >= 5:
+                                    codigo = partes[0]
+                                    especificacao = " ".join(partes[1:-3])
+                                    empenhado = partes[-3]
+                                    liquidado = partes[-2]
+                                    pago = partes[-1].replace("*", "")
+                                    dados_tabela.append([codigo, especificacao, empenhado, liquidado, pago])
 
-                # filtra as linhas que tem código X.X.XX.XX.XX
-                if re.match(r"^\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}", linha):
+        if len(dados_tabela) == 1:
+            messagebox.showwarning("Aviso", "Nenhum dado válido foi encontrado no PDF.")
+            return
 
-                    # regex para capturar as colunas
-                    match = re.match(r"^(\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2}\.\d{1,2})\s+(.+?)\s+([\d\.,-]+)\s+([\d\.,-]+)\s+([\d\.,-]+)\*?$", linha)
-                    
-                    if match:
-                        codigo = match.group(1)
-                        especificacao = match.group(2).strip()  #strip tira espaços do texto
-                        empenhado = match.group(3)
-                        liquidado = match.group(4)
-                        pago = match.group(5)
+    def criar_slides():
+        apresentacao = Presentation()
+        linhas_por_slide = 15
 
-                        dados_tabela.append([codigo, especificacao, empenhado, liquidado, pago])
+        for i in range(0, len(dados_tabela), linhas_por_slide):
+            slide = apresentacao.slides.add_slide(apresentacao.slide_layouts[5])
+            rows = min(linhas_por_slide, len(dados_tabela) - i)
+            cols = len(dados_tabela[0])
 
-                    else:
-                        # se o match nao capturar, ele entra nesse regex alternativo
-                        partes = re.split(r"\s{2,}", linha)  # se tiver 2+ espaços, ele divide a linha
-                        if len(partes) >= 5:
-                            codigo = partes[0]
-                            especificacao = " ".join(partes[1:-3])  # junta as partes da especificação
-                            empenhado = partes[-3]
-                            liquidado = partes[-2]
-                            pago = partes[-1].replace("*", "")  # remove os asteriscos do texto
+            left = Inches(0.5)
+            top = Inches(0.2)
+            width = Inches(9)
+            height = Inches(5)
 
-                            dados_tabela.append([codigo, especificacao, empenhado, liquidado, pago])
+            table = slide.shapes.add_table(rows, cols, left, top, width, height).table
 
-if len(dados_tabela) == 1:
-    print("Nenhum dado válido foi encontrado no PDF.")
-    exit()
+            for r, linha in enumerate(dados_tabela[i:i + linhas_por_slide]):
+                for c, valor in enumerate(linha):
+                    table.cell(r, c).text = valor
 
-# ------ PowerPoint ----------
+        # Salva a apresentação
+        pptx_path = "tabela_pptx.pptx"
+        apresentacao.save(pptx_path)
+        messagebox.showinfo("Sucesso", f"Apresentação criada com sucesso!\nArquivo salvo em: {pptx_path}")
 
-# cria a apresentacao
-apresentacao = Presentation()
+    ler_pdf()
+    criar_slides()
 
-# limite de linhas dentro da lâmina do slide
-linhas_por_slide = 20  
+# ------ Interface gráfica ----------
 
-def criar_slides():
-    # Criar slides conforme necessário
-    for i in range(0, len(dados_tabela), linhas_por_slide):
-        # Adicionar slide
-        slide = apresentacao.slides.add_slide(apresentacao.slide_layouts[5])
+# janela principal
+janela = ThemedTk(theme="clearlooks")
+janela.title("PDF para PPTX")
+janela.geometry("500x200")
 
-        rows = min(linhas_por_slide, len(dados_tabela) - i)
-        cols = len(dados_tabela[0])
+# estilos
+estilo = ttk.Style()
+estilo.configure("TButton", font=("Arial", 12), padding=10)
+estilo.configure("TEntry", font=("Arial", 12), padding=10)
 
-        # posição e tamanho
-        left = Inches(0.5)
-        top = Inches(1)
-        width = Inches(9)
-        height = Inches(5)
+# organizar os widgets
+frame = ttk.Frame(janela)
+frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-        # cria a tabela 
-        table = slide.shapes.add_table(rows, cols, left, top, width, height).table
+# Input do arquivo
+entrada_arquivo = ttk.Entry(frame, width=40)
+entrada_arquivo.grid(row=0, column=0, padx=10, pady=10)
 
-        # preenche a tabela com os dados da matriz
-        for r, linha in enumerate(dados_tabela[i:i + linhas_por_slide]):
-            for c, valor in enumerate(linha):
-                table.cell(r, c).text = valor
+# Botão de selecionar o arquivo
+botao_selecionar = ttk.Button(frame, text="Selecionar PDF", command=selecionar_arquivo)
+botao_selecionar.grid(row=0, column=1, padx=10, pady=10)
 
-criar_slides()
+# Botão para processar o PDF
+botao_processar = ttk.Button(frame, text="Processar PDF", command=processar_pdf)
+botao_processar.grid(row=1, column=0, columnspan=2, pady=10)
 
-# salva a apresentacao
-pptx_path = "tabela_pptx.pptx"
-apresentacao.save(pptx_path)
 
-print(f"Apresentação criada com sucesso! Arquivo salvo em: {pptx_path}")
+#-------------- creditos - rodape --------------
+label_desenvolvido = ttk.Label(text="Desenvolvido por Lucius Hebert", font=("Arial", 10))
+label_desenvolvido.pack(padx=5, pady=2)
+
+# loop do tkinter
+janela.mainloop()
